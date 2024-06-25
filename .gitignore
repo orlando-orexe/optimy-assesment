@@ -1,0 +1,12 @@
+#tmp folder
+tmp/
+
+#vs code
+.vscode/
+
+#macOS files
+".DS_Store"
+
+#automation files
+nohup.out
+

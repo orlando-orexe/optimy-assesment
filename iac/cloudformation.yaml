@@ -1,0 +1,213 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: AWS CloudFormation template equivalent to the provided Terraform configuration
+
+Parameters:
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: List of Subnet IDs for the EKS cluster
+  CIDRBlocksAccess1:
+    Type: String
+    Description: CIDR block for MySQL access rule 1
+  CIDRBlocksAccess2:
+    Type: String
+    Description: CIDR block for MySQL access rule 2
+  CIDRBlocksAccess3:
+    Type: String
+    Description: CIDR block for MySQL access rule 3
+  AllTrafficSourceSGId:
+    Type: AWS::EC2::SecurityGroup::Id
+    Description: Source security group ID for allowing all traffic
+
+Resources:
+  ECRRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: devops-app
+      ImageTagMutability: MUTABLE
+
+  EKSRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: example-eks-cluster
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Action: sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service: eks.amazonaws.com
+
+  EKSClusterPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: eks-cluster-policy
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - eks:*
+            Resource: '*'
+      Roles:
+        - Ref: EKSRole
+
+  EKSServicePolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: eks-service-policy
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - ec2:*
+            Resource: '*'
+      Roles:
+        - Ref: EKSRole
+
+  EKSCluster:
+    Type: AWS::EKS::Cluster
+    Properties:
+      Name: devops-app
+      RoleArn: !GetAtt EKSRole.Arn
+      ResourcesVpcConfig:
+        SubnetIds: !Ref SubnetIds
+      Logging:
+        ClusterLogging:
+          - Types: ["api", "audit", "authenticator"]
+            Enabled: true
+
+  EKSNodeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: example-eks-nodes
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Action: sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+
+  EKSNodeGroup:
+    Type: AWS::EKS::Nodegroup
+    Properties:
+      ClusterName: !Ref EKSCluster
+      NodegroupName: sandbox-ng
+      NodeRole: !GetAtt EKSNodeRole.Arn
+      Subnets: !Ref SubnetIds
+      ScalingConfig:
+        DesiredSize: 2
+        MaxSize: 3
+        MinSize: 2
+      InstanceTypes: ["t3.medium"]
+      RemoteAccess:
+        Ec2SshKey: eu_dkr_k8s
+
+  EKSWorkerNodePolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: eks-worker-node-policy
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - ec2:*
+            Resource: '*'
+      Roles:
+        - Ref: EKSNodeRole
+
+  EKSCNIPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: eks-cni-policy
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - ec2:*
+            Resource: '*'
+      Roles:
+        - Ref: EKSNodeRole
+
+  EKSContainerRegistryPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: eks-container-registry-read-only
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - ecr:GetDownloadUrlForLayer
+              - ecr:BatchGetImage
+              - ecr:BatchCheckLayerAvailability
+            Resource: '*'
+      Roles:
+        - Ref: EKSNodeRole
+
+  MySQLDBInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceIdentifier: default
+      AllocatedStorage: 20
+      StorageType: gp2
+      Engine: mysql
+      EngineVersion: 8.0.35
+      DBInstanceClass: db.t3.micro
+      MasterUsername: mydbuser
+      MasterUserPassword: mypassword
+      DBParameterGroupName: default.mysql8.0
+      PubliclyAccessible: true
+      Tags:
+        - Key: Name
+          Value: mysql
+
+  SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: devops-app
+      VpcId: <your_VPC_ID>
+      GroupDescription: Security group for MySQL access
+
+  MySQLIngressRule1:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref SecurityGroup
+      IpProtocol: tcp
+      FromPort: 3306
+      ToPort: 3306
+      CidrIp: !Ref CIDRBlocksAccess1
+      Description: Allow MySQL access
+
+  MySQLIngressRule2:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref SecurityGroup
+      IpProtocol: tcp
+      FromPort: 3306
+      ToPort: 3306
+      CidrIp: !Ref CIDRBlocksAccess2
+      Description: Allow MySQL access
+
+  MySQLIngressRule3:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref SecurityGroup
+      IpProtocol: tcp
+      FromPort: 3306
+      ToPort: 3306
+      CidrIp: !Ref CIDRBlocksAccess3
+      Description: Allow MySQL access
+
+  AllTrafficIngressRule:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref SecurityGroup
+      IpProtocol: -1
+      FromPort: 0
+      ToPort: 0
+      SourceSecurityGroupId: !Ref AllTrafficSourceSGId
+      Description: Allow all traffic from sg-0185a6c49fbf7ecf7
